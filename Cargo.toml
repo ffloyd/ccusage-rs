@@ -9,7 +9,7 @@ homepage = "https://github.com/snowmead/cc-usage-rs"
 repository = "https://github.com/snowmead/cc-usage-rs"
 license = "MIT"
 keywords = ["claude", "monitoring", "token-usage", "cli", "cost-tracking"]
-categories = ["command-line-utilities", "development-tools", "claude-code"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "cc-usage-rs"
