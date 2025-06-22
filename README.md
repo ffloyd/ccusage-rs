@@ -35,30 +35,43 @@ A real-time token usage monitor for Claude Code (cc) written in Rust. This tool 
 
 ## Installation
 
+### From crates.io (Recommended)
+
 ```bash
-cargo install --path .
+cargo install cc-usage-rs
 ```
 
-Or build from source:
+### From source
 
 ```bash
+# Clone the repository
+git clone https://github.com/snowmead/cc-usage-rs
+cd cc-usage-rs
+
+# Install locally
+cargo install --path .
+
+# Or build manually
 cargo build --release
+# Binary will be at ./target/release/cc-usage-rs
 ```
 
 ## Usage
 
+After installation, the `cc-usage-rs` command will be available in your PATH:
+
 ```bash
 # Run with default settings (Pro plan)
-./target/release/cc-usage-rs
+cc-usage-rs
 
 # Specify a plan
-./target/release/cc-usage-rs --plan max5
+cc-usage-rs --plan max5
 
 # Custom reset hour (e.g., 3 AM)
-./target/release/cc-usage-rs --reset-hour 3
+cc-usage-rs --reset-hour 3
 
 # Different timezone
-./target/release/cc-usage-rs --timezone "America/New_York"
+cc-usage-rs --timezone "America/New_York"
 ```
 
 ## Options
