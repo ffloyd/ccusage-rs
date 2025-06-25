@@ -156,6 +156,16 @@ If you see "Error running ccusage":
 3. Verify you're logged into Claude Code
 4. Run `ccusage blocks --json` manually to test
 
+## Star History
+
+<a href="https://www.star-history.com/#ryoppippi/ccusage&Date">
+    <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ryoppippi/ccusage&type=Date&theme=dark" />
+        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ryoppippi/ccusage&type=Date" />
+        <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ryoppippi/ccusage&type=Date" />
+    </picture>
+</a>
+
 ## License
 
 MIT
