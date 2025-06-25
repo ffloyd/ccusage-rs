@@ -1,18 +1,18 @@
 [package]
-name = "cc-usage-rs"
+name = "ccusage-rs"
 version = "0.1.0"
 edition = "2024"
 authors = ["snowmead <snowmead@duck.com>"]
 description = "Real-time token usage monitor for Claude Code (cc) with cost tracking"
 readme = "README.md"
-homepage = "https://github.com/snowmead/cc-usage-rs"
-repository = "https://github.com/snowmead/cc-usage-rs"
+homepage = "https://github.com/snowmead/ccusage-rs"
+repository = "https://github.com/snowmead/ccusage-rs"
 license = "MIT"
 keywords = ["claude", "monitoring", "token-usage", "cli", "cost-tracking"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
-name = "cc-usage-rs"
+name = "ccusage-rs"
 path = "src/main.rs"
 
 [dependencies]

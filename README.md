@@ -1,21 +1,22 @@
 # CC Usage Monitor
 
-A real-time token usage monitor for Claude Code (cc) written in Rust. This tool provides comprehensive monitoring of your Claude API token usage across all instances, with detailed cost tracking and predictions.
+A comprehensive token usage analyzer for Claude Code written in Rust. This tool analyzes your Claude API token usage from session logs, providing detailed cost tracking, daily statistics, and usage patterns.
 
 ## Features
 
-### Core Monitoring
+### Session Log Analysis
 
-- **Real-time token usage tracking** across all Claude Code instances
-- **Visual progress bars** for token usage and time remaining
-- **Automatic plan detection** (Pro/Max5/Max20/CustomMax)
-- **Multi-instance support** - monitors all Claude usage on your account
+- **Native JSONL parsing** - Direct analysis of Claude Code session logs
+- **Global deduplication** - Prevents counting duplicate entries across files
+- **Schema validation** - Ensures data integrity matching ccusage standards
+- **Multi-project support** - Analyzes usage across all your Claude projects
 
 ### Financial Tracking
 
-- **Cost monitoring** - displays current session cost and projected total
-- **Hourly burn rate** - shows both tokens/minute and $/hour rates
-- **Cost projections** - predicts total session cost based on current usage
+- **Accurate cost calculations** - Per-token pricing for all Claude models
+- **Daily cost summaries** - Track spending patterns over time
+- **Model-specific pricing** - Supports all Claude 3, 3.5, and 4 models
+- **Cache token costs** - Includes cache creation and read token pricing
 
 ### Token Analytics
 
@@ -24,145 +25,168 @@ A real-time token usage monitor for Claude Code (cc) written in Rust. This tool 
   - Output tokens
   - Cache creation tokens
   - Cache read tokens
-- **Model tracking** - shows which Claude models are being used
-- **Accurate projections** using data from `ccusage` API
+- **Model usage tracking** - Shows which Claude models you're using
+- **Daily aggregations** - Comprehensive daily usage statistics
 
-### Customization
+### Output Formats
 
-- **Flexible reset times** - customize when your token limits reset
-- **Timezone support** - set your local timezone for accurate reset times
-- **Multiple plan types** with automatic switching when limits exceeded
+- **Table view** - Human-readable daily usage tables
+- **JSON output** - Machine-readable format for integration
+- **Flexible filtering** - Date ranges and project-specific analysis
 
 ## Installation
 
 ### From crates.io (Recommended)
 
 ```bash
-cargo install cc-usage-rs
+cargo install ccusage-rs
 ```
 
 ### From source
 
 ```bash
 # Clone the repository
-git clone https://github.com/snowmead/cc-usage-rs
-cd cc-usage-rs
+git clone https://github.com/snowmead/ccusage-rs
+cd ccusage-rs
 
 # Install locally
 cargo install --path .
 
 # Or build manually
 cargo build --release
-# Binary will be at ./target/release/cc-usage-rs
+# Binary will be at ./target/release/ccusage-rs
 ```
 
 ## Usage
 
-After installation, the `cc-usage-rs` command will be available in your PATH:
+After installation, the `ccusage-rs` command will be available in your PATH:
 
 ```bash
-# Run with default settings (Pro plan)
-cc-usage-rs
+# Show daily usage table
+ccusage-rs --table
 
-# Specify a plan
-cc-usage-rs --plan max5
+# Output as JSON for integration
+ccusage-rs --json
 
-# Custom reset hour (e.g., 3 AM)
-cc-usage-rs --reset-hour 3
+# Analyze specific project directory
+ccusage-rs --table --project-dir ~/my-claude-project
 
-# Different timezone
-cc-usage-rs --timezone "America/New_York"
+# Debug mode with detailed logging
+ccusage-rs --table --debug
+
+# Specify custom Claude directory
+ccusage-rs --table --claude-dir ~/.claude-custom
 ```
 
 ## Options
 
-- `--plan` - Claude plan type:
-  - `pro` (default) - 7,000 tokens
-  - `max5` - 35,000 tokens
-  - `max20` - 140,000 tokens
-  - `custom-max` - auto-detects based on historical usage
-- `--reset-hour` - Custom reset hour (0-23). Default: 4, 9, 14, 18, 23
-- `--timezone` - Timezone for reset times. Default: "Europe/Warsaw"
+- `--table` - Display daily usage in table format
+- `--json` - Output results as JSON
+- `--project-dir <PATH>` - Analyze specific project directory
+- `--claude-dir <PATH>` - Custom Claude directory path (default: ~/.claude)
+- `--debug` - Enable debug output and detailed logging
+- `--test-parser` - Test JSONL parser compatibility
 
-## Display Information
+## Sample Output
 
-The monitor provides a comprehensive real-time view:
+### Table Format
 
 ```
-✦ ✧ ✦ ✧ CLAUDE TOKEN MONITOR ✦ ✧ ✦ ✧
-============================================================
+┌────────────┬─────────────┬──────────────┬───────────────┬──────────────┬─────────────┬──────────────┬─────────────┐
+│ Date       │ Models      │ Input Tokens │ Output Tokens │ Cache Create │ Cache Read  │ Total Tokens │ Cost (USD)  │
+├────────────┼─────────────┼──────────────┼───────────────┼──────────────┼─────────────┼──────────────┼─────────────┤
+│ 2024-06-20 │ sonnet-4    │ 12,543       │ 8,921         │ 2,847        │ 1,234       │ 25,545       │ $0.89       │
+│ 2024-06-21 │ opus-4      │ 8,234        │ 15,678        │ 0            │ 892         │ 24,804       │ $2.34       │
+│ 2024-06-22 │ sonnet-4    │ 15,892       │ 12,456        │ 3,421        │ 2,108       │ 33,877       │ $1.23       │
+└────────────┴─────────────┴──────────────┴───────────────┴──────────────┴─────────────┴──────────────┴─────────────┘
 
-📊 Token Usage:    🟢 [███████████░░░░░░░░░░░░░] 46.3%
-⏳ Time to Reset:  ⏰ [█████████████████░░░░░░░] 1h 13m
-
-🎯 Tokens:         3,239 / ~7,000 (3,761 left)
-💰 Cost:           $20.65 → $228.24 (projected)
-🔥 Burn Rate:      119.3 tokens/min | $45.65/hr
-📊 Token Types:    In: 455, Out: 2,784, Cache: 6,943,224
-
-🏁 Predicted End: 21:19
-🔄 Token Reset:   18:00
-🤖 Model:         claude-opus-4-20250514
-
-⏰ 10:46:39 📝 Smooth sailing... | Ctrl+C to exit
+Total Usage: 84,226 tokens | Total Cost: $4.46
 ```
 
-### Display Elements:
+### JSON Format
 
-- **Token Usage Bar**: Visual representation of current usage vs limit
-- **Time to Reset Bar**: Shows time remaining until next token reset
-- **Token Stats**: Current usage, limit, and remaining tokens
-- **Cost Tracking**: Current cost and projected session total
-- **Burn Rate**: Token consumption rate and hourly cost
-- **Token Breakdown**: Detailed view of different token types
-- **Predictions**: When tokens will run out and when they reset
-- **Model Info**: Which Claude model(s) are currently being used
+```json
+{
+  "summary": {
+    "total_tokens": 84226,
+    "total_cost_usd": 4.46,
+    "date_range": {
+      "start": "2024-06-20",
+      "end": "2024-06-22"
+    }
+  },
+  "daily_stats": [
+    {
+      "date": "2024-06-20",
+      "models": ["sonnet-4"],
+      "input_tokens": 12543,
+      "output_tokens": 8921,
+      "cache_creation_tokens": 2847,
+      "cache_read_tokens": 1234,
+      "total_tokens": 25545,
+      "cost_usd": 0.89
+    }
+  ]
+}
+```
 
-### Warnings:
+### Key Metrics:
 
-- 🔄 Automatic plan switching notification when exceeding Pro limits
-- 🚨 Red alert when tokens exceed maximum limit
-- ⚠️ Warning when tokens will run out before reset time
+- **Daily breakdown** - Usage statistics for each day
+- **Model tracking** - Which Claude models were used
+- **Token categories** - Input, output, cache creation, and cache read tokens
+- **Cost calculations** - Accurate pricing based on current Anthropic rates
+- **Total summaries** - Aggregate statistics across all analyzed sessions
 
 ## Requirements
 
 - Rust 1.70+
-- `ccusage` command must be installed and available in PATH
-- Active Claude Code subscription
+- Claude Code installation with session logs
+- Active Claude Code usage (generates JSONL session files)
 
 ## How It Works
 
-The monitor polls the `ccusage blocks --json` command every 3 seconds to get real-time usage data. It processes the JSON response to extract:
+The tool analyzes Claude Code session logs stored in `~/.claude/` directory:
 
-- Active session information
-- Token counts by type
-- Cost data
-- Burn rates and projections
-- Model usage
+1. **Session Discovery**: Finds all JSONL session files across projects
+2. **Schema Validation**: Validates entries against ccusage standards
+3. **Global Deduplication**: Prevents duplicate counting across files
+4. **Token Analysis**: Extracts and categorizes token usage by type
+5. **Cost Calculation**: Applies current Anthropic pricing models
+6. **Aggregation**: Groups usage statistics by date
 
-The tool intelligently handles:
+### Session Log Processing:
 
-- Null values in the API response
-- Multiple Claude instances running simultaneously
-- Automatic plan detection and switching
-- Time zone conversions for reset times
+- **Native JSONL parsing** - No external dependencies
+- **Entry-level deduplication** - Matching ccusage behavior exactly
+- **Robust error handling** - Skips invalid entries gracefully
+- **Multi-project support** - Analyzes all your Claude projects
+- **Schema validation** - Ensures data integrity
+
+## Data Sources
+
+The tool reads session data from:
+
+- `~/.claude/sessions/` - Global session files
+- `<project-dir>/.claude/` - Project-specific session files
+- Automatic discovery of all Claude project directories
 
 ## Troubleshooting
 
-If you see "Error running ccusage":
+If you see "No valid usage data found":
 
-1. Ensure `ccusage` is installed: `npm install -g ccusage`
-2. Check that `ccusage` is in your PATH
-3. Verify you're logged into Claude Code
-4. Run `ccusage blocks --json` manually to test
+1. Ensure you've used Claude Code recently (generates session logs)
+2. Check that `~/.claude/` directory exists
+3. Verify session files contain usage data: `ls ~/.claude/sessions/`
+4. Use `--debug` flag for detailed parsing information
 
 ## Star History
 
-<a href="https://www.star-history.com/#ryoppippi/ccusage&Date">
+<a href="https://www.star-history.com/#snowmead/ccusage-rs&Date">
     <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=snowmead/claude-code-usage&type=Date&theme=dark" />
-        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=snowmead/claude-code-usage&type=Date" />
-        <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=snowmead/claude-code-usage&type=Date" />
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=snowmead/ccusage-rs&type=Date&theme=dark" />
+        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=snowmead/ccusage-rs&type=Date" />
+        <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=snowmead/ccusage-rs&type=Date" />
     </picture>
 </a>
 
