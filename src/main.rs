@@ -9,6 +9,7 @@
 
 mod analytics;
 mod block_builder;
+mod entry_processor;
 mod jsonl_parser;
 mod models;
 mod plan_detector;
@@ -159,6 +160,10 @@ struct Args {
     /// Test new JSONL parser
     #[arg(long)]
     test_parser: bool,
+
+    /// Output in JSON format
+    #[arg(long)]
+    json: bool,
 }
 
 fn run_native_analysis() -> Result<CcUsageData> {
@@ -435,8 +440,8 @@ async fn main() -> Result<()> {
     if args.test_parser {
         // Test new parser and exit
         test_parser_comparison(&args)
-    } else if args.table {
-        // Show table view and exit
+    } else if args.table || args.json {
+        // Show table view or JSON output and exit
         show_table_view(&args)
     } else {
         // Setup terminal - don't use raw mode as it interferes with output
@@ -471,16 +476,21 @@ fn show_table_view(args: &Args) -> Result<()> {
         );
     }
 
-    println!("DEBUG: Found {} project directories", project_dirs.len());
-    for dir in &project_dirs {
-        println!("DEBUG: Project dir: {}", dir.display());
-    }
+    // Found {} project directories
 
     // Find all JSONL session files from all project directories
     let mut session_files = Vec::new();
     for project_dir in &project_dirs {
         let files = jsonl_parser::find_session_files(project_dir, None)
             .context("Failed to find session files")?;
+        
+        if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
+            println!("DEBUG: Found {} files in project dir: {}", files.len(), project_dir.display());
+            for file in &files {
+                println!("DEBUG: Session file: {}", file.display());
+            }
+        }
+        
         session_files.extend(files);
     }
 
@@ -490,56 +500,26 @@ fn show_table_view(args: &Args) -> Result<()> {
         );
     }
 
-    // Parse all sessions with entry-level deduplication (matching ccusage)
-    let mut all_sessions = Vec::new();
-    let mut processed_hashes = std::collections::HashSet::new();
+    // Process all entries with global entry-level deduplication (matching ccusage exactly)
+    let daily_stats = entry_processor::process_all_entries(&session_files)
+        .context("Failed to process entries and aggregate daily statistics")?;
 
-    for file in session_files {
-        match jsonl_parser::parse_session_file_with_deduplication(&file, &mut processed_hashes) {
-            Ok(session) => {
-                println!(
-                    "DEBUG: Found session {} with {} models and {} total weighted tokens from file {}",
-                    session.session_id,
-                    session.model_usage.len(),
-                    session.total_weighted_tokens,
-                    file.file_name().unwrap_or_default().to_string_lossy()
-                );
-                all_sessions.push(session);
-            }
-            Err(e) => {
-                if args.debug {
-                    eprintln!("Failed to parse session file {}: {}", file.display(), e);
-                }
-                continue;
-            }
-        }
-    }
-
-    if all_sessions.is_empty() {
+    if daily_stats.is_empty() {
         anyhow::bail!(
-            "No valid session data found. The JSONL files may be corrupted or in an unexpected format."
+            "No valid usage data found. The JSONL files may be corrupted or in an unexpected format."
         );
     }
 
-    println!(
-        "DEBUG: Found {} total sessions before deduplication",
-        all_sessions.len()
-    );
-
-    // Deduplicate sessions by session ID (multiple JSONL files can contain same session)
-    let deduplicated_sessions = deduplicate_sessions(all_sessions);
-    println!(
-        "DEBUG: After deduplication: {} unique sessions",
-        deduplicated_sessions.len()
-    );
-
-    // Aggregate daily statistics
-    let daily_stats = aggregate_daily_stats(&deduplicated_sessions)
-        .context("Failed to aggregate daily statistics")?;
-
-    // Display the table
-    let table_output = format_table(&daily_stats);
-    println!("{}", table_output);
+    if args.json {
+        // Output in JSON format
+        let json_output = table_display::generate_json_output(&daily_stats)
+            .context("Failed to generate JSON output")?;
+        println!("{}", serde_json::to_string_pretty(&json_output)?);
+    } else {
+        // Display the table
+        let table_output = format_table(&daily_stats);
+        println!("{}", table_output);
+    }
 
     Ok(())
 }
@@ -967,6 +947,7 @@ fn deduplicate_sessions(
     sessions: Vec<jsonl_parser::SessionData>,
 ) -> Vec<jsonl_parser::SessionData> {
     let mut session_map: HashMap<String, jsonl_parser::SessionData> = HashMap::new();
+
 
     for session in sessions {
         let session_id = session.session_id.clone();

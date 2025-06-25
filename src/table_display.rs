@@ -9,11 +9,43 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Utc, Datelike};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::jsonl_parser::SessionData;
 use crate::pricing::calculate_session_cost;
 
-#[derive(Debug, Default)]
+/// JSON structures matching ccusage format exactly
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsonModelBreakdown {
+    pub model_name: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsonDailyEntry {
+    pub date: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub total_tokens: u64,
+    pub total_cost: f64,
+    pub models_used: Vec<String>,
+    pub model_breakdowns: Vec<JsonModelBreakdown>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct JsonOutput {
+    pub daily: Vec<JsonDailyEntry>,
+}
+
+#[derive(Debug, Default, Serialize)]
 pub struct DailyStats {
     pub date: String,
     pub models: Vec<String>,
@@ -47,9 +79,7 @@ impl DailyStats {
                 self.models.push(simplified_model);
             }
 
-            // Debug logging
-            println!("DEBUG: Model {}, Input: {}, Output: {}, Cache Write: {}, Cache Read: {}", 
-                model_name, usage.total_input, usage.total_output, usage.total_cache_write, usage.total_cache_read);
+            // Track token aggregation for table display
 
             // Add token counts
             self.input_tokens += usage.total_input;
@@ -61,7 +91,6 @@ impl DailyStats {
         // Update totals
         self.total_tokens = self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens;
         let session_cost = calculate_session_cost(&session.model_usage);
-        println!("DEBUG: Session cost: ${:.2} for date {}", session_cost, self.date);
         self.cost_usd += session_cost;
     }
 }
@@ -69,8 +98,20 @@ impl DailyStats {
 pub fn aggregate_daily_stats(sessions: &[SessionData]) -> Result<Vec<DailyStats>> {
     let mut daily_map: HashMap<String, DailyStats> = HashMap::new();
 
+    // Debug: Track what dates we're processing
+    if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
+        println!("DEBUG: Processing {} total sessions", sessions.len());
+    }
+
     for session in sessions {
         let date_key = session.start_time.format("%Y-%m-%d").to_string();
+        
+        // Debug: Show date processing
+        if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
+            if !daily_map.contains_key(&date_key) {
+                println!("DEBUG: First session for date {}: session {}", date_key, session.session_id);
+            }
+        }
         
         let daily_stat = daily_map.entry(date_key.clone())
             .or_insert_with(|| DailyStats::new(date_key));
@@ -238,6 +279,44 @@ pub fn format_table(daily_stats: &[DailyStats]) -> String {
     ));
 
     output
+}
+
+/// Convert daily stats to JSON format matching ccusage
+pub fn generate_json_output(daily_stats: &[DailyStats]) -> Result<JsonOutput> {
+    let mut json_daily = Vec::new();
+    
+    for stats in daily_stats {
+        // Create model breakdowns from the models list
+        let mut model_breakdowns = Vec::new();
+        
+        // For now, we'll aggregate all tokens under the primary model
+        // This is a simplification - ideally we'd track per-model usage separately
+        if !stats.models.is_empty() {
+            let primary_model = &stats.models[0];
+            model_breakdowns.push(JsonModelBreakdown {
+                model_name: primary_model.clone(),
+                input_tokens: stats.input_tokens,
+                output_tokens: stats.output_tokens,
+                cache_creation_tokens: stats.cache_creation_tokens,
+                cache_read_tokens: stats.cache_read_tokens,
+                cost: stats.cost_usd,
+            });
+        }
+        
+        json_daily.push(JsonDailyEntry {
+            date: stats.date.clone(),
+            input_tokens: stats.input_tokens,
+            output_tokens: stats.output_tokens,
+            cache_creation_tokens: stats.cache_creation_tokens,
+            cache_read_tokens: stats.cache_read_tokens,
+            total_tokens: stats.total_tokens,
+            total_cost: stats.cost_usd,
+            models_used: stats.models.clone(),
+            model_breakdowns,
+        });
+    }
+    
+    Ok(JsonOutput { daily: json_daily })
 }
 
 #[cfg(test)]

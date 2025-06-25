@@ -20,15 +20,22 @@ use crate::models::calculate_weighted_tokens;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEntry {
+    #[serde(default)]
     pub parent_uuid: Option<String>,
+    #[serde(default)]
     pub is_sidechain: bool,
+    #[serde(default)]
     pub user_type: String,
+    #[serde(default)]
     pub cwd: String,
+    #[serde(default)]
     pub session_id: String,
+    #[serde(default)]
     pub version: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub entry_type: String,
     pub message: Option<Message>,
+    #[serde(default)]
     pub uuid: String,
     pub timestamp: String,
     #[serde(default)]
@@ -42,14 +49,21 @@ pub struct SessionEntry {
 pub struct Message {
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
     pub role: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub message_type: Option<String>,
     pub usage: Option<Usage>,
+    #[serde(default)]
     pub content: Option<serde_json::Value>,
+    #[serde(default)]
     pub stop_reason: Option<String>,
+    #[serde(default)]
     pub stop_sequence: Option<String>,
+    #[serde(rename = "costUSD", default)]
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,25 +152,18 @@ impl SessionData {
                 }
             }
 
-            // Track token usage by model (matching ccusage filtering)
+            // Track token usage by model (matching ccusage filtering exactly)
             if let (Some(model), Some(usage)) = (&message.model, &message.usage) {
-                // Only filter synthetic models (matching ccusage behavior)
+                // Only filter synthetic models (matching ccusage aggregateByModel behavior)
                 if model != "<synthetic>" {
-                    let raw_tokens = usage.input_tokens
-                        + usage.output_tokens
-                        + usage.cache_creation_input_tokens
-                        + usage.cache_read_input_tokens;
-                    // Only track entries that actually have token usage
-                    if raw_tokens > 0 {
-                        let model_usage =
-                            self.model_usage
-                                .entry(model.clone())
-                                .or_insert_with(|| ModelUsage {
-                                    model_name: model.clone(),
-                                    ..Default::default()
-                                });
-                        model_usage.add_usage(usage);
-                    }
+                    let model_usage =
+                        self.model_usage
+                            .entry(model.clone())
+                            .or_insert_with(|| ModelUsage {
+                                model_name: model.clone(),
+                                ..Default::default()
+                            });
+                    model_usage.add_usage(usage);
                 }
             }
         }
@@ -180,6 +187,59 @@ impl SessionData {
             .map(|usage| usage.weighted_tokens)
             .sum();
     }
+}
+
+/// Validate entry schema exactly like ccusage does (minimal validation)
+fn validate_usage_schema(json: &serde_json::Value) -> bool {
+    // Only check absolute minimum required fields that ccusage requires
+    
+    // 1. Timestamp must be present (ccusage checks this)
+    if !json.get("timestamp").and_then(|v| v.as_str()).is_some() {
+        return false;
+    }
+
+    // 2. Message object must be present
+    let message = match json.get("message") {
+        Some(m) if m.is_object() => m,
+        _ => return false,
+    };
+
+    // 3. Usage object must be present within message
+    let usage = match message.get("usage") {
+        Some(u) if u.is_object() => u,
+        _ => return false,
+    };
+
+    // 4. ONLY input_tokens and output_tokens are required (ccusage requires these as numbers)
+    if !usage.get("input_tokens").and_then(|v| v.as_f64()).is_some() {
+        return false;
+    }
+    if !usage.get("output_tokens").and_then(|v| v.as_f64()).is_some() {
+        return false;
+    }
+
+    // All other fields are optional and ccusage is very lenient
+    // Don't validate optional fields to match ccusage's behavior
+    
+    true
+}
+
+/// Validate ISO timestamp format matching ccusage regex: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/
+fn is_valid_iso_timestamp(timestamp: &str) -> bool {
+    use regex::Regex;
+    
+    // Create regex exactly matching ccusage validation
+    let iso_regex = Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$").unwrap();
+    iso_regex.is_match(timestamp)
+}
+
+/// Validate version format matching ccusage regex: /^\d+\.\d+\.\d+/ (lenient - starts with pattern)
+fn is_valid_version_lenient(version: &str) -> bool {
+    use regex::Regex;
+    
+    // ccusage regex only requires string to START with semantic version pattern
+    let version_regex = Regex::new(r"^\d+\.\d+\.\d+").unwrap();
+    version_regex.is_match(version)
 }
 
 /// Create unique hash for entry deduplication (matching ccusage logic)
@@ -209,9 +269,25 @@ pub fn parse_session_file_with_deduplication(
             continue;
         }
 
+        // Parse as raw JSON first to check for missing fields (matching ccusage validation)
+        let parsed_json: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(json) => json,
+            Err(_) => {
+                skipped_invalid += 1;
+                continue;
+            }
+        };
+
+        // Validate schema like ccusage does
+        if !validate_usage_schema(&parsed_json) {
+            skipped_invalid += 1;
+            continue;
+        }
+
         // Try to parse as SessionEntry
         match serde_json::from_str::<SessionEntry>(&line) {
             Ok(entry) => {
+                
                 // Create unique hash for deduplication (matching ccusage logic)
                 if let Some(unique_hash) = create_unique_hash(&entry) {
                     if processed_hashes.contains(&unique_hash) {
@@ -221,24 +297,14 @@ pub fn parse_session_file_with_deduplication(
                     processed_hashes.insert(unique_hash);
                 }
 
-                // Skip entries without usage data (matching ccusage strict validation)
-                if let Some(message) = &entry.message {
-                    if message.usage.is_none() {
-                        skipped_invalid += 1;
-                        continue;
-                    }
-                } else {
-                    skipped_invalid += 1;
-                    continue;
-                }
-
                 // Initialize session data on first valid entry
                 if session_data.is_none() {
                     if let Ok(timestamp) = DateTime::parse_from_rfc3339(&entry.timestamp) {
-                        session_data = Some(SessionData::new(
+                        let new_session = SessionData::new(
                             entry.session_id.clone(),
                             timestamp.with_timezone(&Utc),
-                        ));
+                        );
+                        session_data = Some(new_session);
                     }
                 }
 
@@ -253,10 +319,12 @@ pub fn parse_session_file_with_deduplication(
         }
     }
 
-    if skipped_duplicates > 0 || skipped_invalid > 0 {
+    // Only print debug info if explicitly requested via environment variable
+    if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
         println!(
-            "DEBUG: File {} - Skipped {} duplicates, {} invalid entries",
+            "DEBUG: File {} - {} valid entries, {} skipped duplicates, {} invalid entries",
             path.file_name().unwrap_or_default().to_string_lossy(),
+            if session_data.is_some() { "processed" } else { "0" },
             skipped_duplicates,
             skipped_invalid
         );

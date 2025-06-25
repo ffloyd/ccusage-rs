@@ -6,26 +6,34 @@
 //! - [`ModelPricing`] - Pricing structure for different token types
 //! - [`calculate_session_cost`] - Calculate total cost for a session
 //! - [`get_model_pricing`] - Get pricing configuration for a specific model
+//! - [`CostCalculationMode`] - Cost calculation modes matching ccusage
 
 use std::collections::HashMap;
-use crate::jsonl_parser::ModelUsage;
+use crate::jsonl_parser::{ModelUsage, Usage, SessionEntry};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CostCalculationMode {
+    Auto,       // Use existing costUSD or calculate if missing
+    Display,    // Always use existing costUSD 
+    Calculate,  // Always recalculate from tokens
+}
 
 #[derive(Debug, Clone)]
 pub struct ModelPricing {
-    pub input_cost_per_million: f64,
-    pub output_cost_per_million: f64,
-    pub cache_write_cost_per_million: f64,
-    pub cache_read_cost_per_million: f64,
+    pub input_cost_per_token: f64,
+    pub output_cost_per_token: f64,
+    pub cache_creation_input_token_cost: f64,
+    pub cache_read_input_token_cost: f64,
 }
 
 impl ModelPricing {
     pub fn calculate_cost(&self, usage: &ModelUsage) -> f64 {
-        let input_cost = (usage.total_input as f64 / 1_000_000.0) * self.input_cost_per_million;
-        let output_cost = (usage.total_output as f64 / 1_000_000.0) * self.output_cost_per_million;
-        let cache_write_cost = (usage.total_cache_write as f64 / 1_000_000.0) * self.cache_write_cost_per_million;
-        let cache_read_cost = (usage.total_cache_read as f64 / 1_000_000.0) * self.cache_read_cost_per_million;
+        let input_cost = (usage.total_input as f64) * self.input_cost_per_token;
+        let output_cost = (usage.total_output as f64) * self.output_cost_per_token;
+        let cache_creation_cost = (usage.total_cache_write as f64) * self.cache_creation_input_token_cost;
+        let cache_read_cost = (usage.total_cache_read as f64) * self.cache_read_input_token_cost;
         
-        input_cost + output_cost + cache_write_cost + cache_read_cost
+        input_cost + output_cost + cache_creation_cost + cache_read_cost
     }
 }
 
@@ -36,73 +44,73 @@ pub fn get_model_pricing(model_name: &str) -> Option<ModelPricing> {
         // Claude 3.5 Sonnet (latest)
         name if name.contains("claude-3-5-sonnet") || name.contains("claude-sonnet-3-5") => {
             Some(ModelPricing {
-                input_cost_per_million: 3.00,
-                output_cost_per_million: 15.00,
-                cache_write_cost_per_million: 3.75,  // 25% markup on input
-                cache_read_cost_per_million: 0.30,   // 90% discount on input
+                input_cost_per_token: 3e-6,
+                output_cost_per_token: 15e-6,
+                cache_creation_input_token_cost: 3.75e-6,
+                cache_read_input_token_cost: 0.3e-6,
             })
         },
         // Claude 3.5 Haiku (Official Anthropic pricing)
         name if name.contains("claude-3-5-haiku") || name.contains("claude-haiku-3-5") => {
             Some(ModelPricing {
-                input_cost_per_million: 0.80,    // Official pricing
-                output_cost_per_million: 4.00,
-                cache_write_cost_per_million: 1.00,   // $1.00/MTok
-                cache_read_cost_per_million: 0.08,    // $0.08/MTok
+                input_cost_per_token: 0.8e-6,
+                output_cost_per_token: 4e-6,
+                cache_creation_input_token_cost: 1e-6,
+                cache_read_input_token_cost: 0.08e-6,
             })
         },
         // Claude 3 Opus
         name if name.contains("claude-3-opus") || name.contains("claude-opus-3") => {
             Some(ModelPricing {
-                input_cost_per_million: 15.00,
-                output_cost_per_million: 75.00,
-                cache_write_cost_per_million: 18.75, // 25% markup on input
-                cache_read_cost_per_million: 1.50,   // 90% discount on input
+                input_cost_per_token: 15e-6,
+                output_cost_per_token: 75e-6,
+                cache_creation_input_token_cost: 18.75e-6,
+                cache_read_input_token_cost: 1.5e-6,
             })
         },
         // Claude 3 Sonnet (legacy)
         name if name.contains("claude-3-sonnet") || name.contains("claude-sonnet-3") => {
             Some(ModelPricing {
-                input_cost_per_million: 3.00,
-                output_cost_per_million: 15.00,
-                cache_write_cost_per_million: 3.75,  // 25% markup on input
-                cache_read_cost_per_million: 0.30,   // 90% discount on input
+                input_cost_per_token: 3e-6,
+                output_cost_per_token: 15e-6,
+                cache_creation_input_token_cost: 3.75e-6,
+                cache_read_input_token_cost: 0.3e-6,
             })
         },
         // Claude 3 Haiku (legacy)
         name if name.contains("claude-3-haiku") || name.contains("claude-haiku-3") => {
             Some(ModelPricing {
-                input_cost_per_million: 0.25,
-                output_cost_per_million: 1.25,
-                cache_write_cost_per_million: 0.31,  // 25% markup on input
-                cache_read_cost_per_million: 0.025,  // 90% discount on input
+                input_cost_per_token: 0.25e-6,
+                output_cost_per_token: 1.25e-6,
+                cache_creation_input_token_cost: 0.31e-6,
+                cache_read_input_token_cost: 0.025e-6,
             })
         },
         // Claude 4 Opus (Official Anthropic pricing)
         name if name.contains("claude-opus-4") || name.contains("claude-4-opus") => {
             Some(ModelPricing {
-                input_cost_per_million: 15.00,   // Official pricing
-                output_cost_per_million: 75.00,
-                cache_write_cost_per_million: 18.75,  // $18.75/MTok
-                cache_read_cost_per_million: 1.50,    // $1.50/MTok
+                input_cost_per_token: 15e-6,
+                output_cost_per_token: 75e-6,
+                cache_creation_input_token_cost: 18.75e-6,
+                cache_read_input_token_cost: 1.5e-6,
             })
         },
         // Claude 4 Sonnet (Official Anthropic pricing)
         name if name.contains("claude-sonnet-4") || name.contains("claude-4-sonnet") => {
             Some(ModelPricing {
-                input_cost_per_million: 3.00,    // Official pricing
-                output_cost_per_million: 15.00,
-                cache_write_cost_per_million: 3.75,   // $3.75/MTok
-                cache_read_cost_per_million: 0.30,    // $0.30/MTok
+                input_cost_per_token: 3e-6,
+                output_cost_per_token: 15e-6,
+                cache_creation_input_token_cost: 3.75e-6,
+                cache_read_input_token_cost: 0.3e-6,
             })
         },
         // Default fallback for unknown models - use Sonnet 3.5 pricing
         _ => {
             Some(ModelPricing {
-                input_cost_per_million: 3.00,
-                output_cost_per_million: 15.00,
-                cache_write_cost_per_million: 3.75,
-                cache_read_cost_per_million: 0.30,
+                input_cost_per_token: 3e-6,
+                output_cost_per_token: 15e-6,
+                cache_creation_input_token_cost: 3.75e-6,
+                cache_read_input_token_cost: 0.3e-6,
             })
         }
     }
@@ -114,6 +122,61 @@ pub fn calculate_session_cost(model_usage: &HashMap<String, ModelUsage>) -> f64 
             get_model_pricing(model_name).map(|pricing| pricing.calculate_cost(usage))
         })
         .sum()
+}
+
+/// Calculate cost for a single entry matching ccusage's calculateCostForEntry logic
+pub fn calculate_cost_for_entry(
+    entry: &SessionEntry,
+    mode: CostCalculationMode,
+) -> f64 {
+    match mode {
+        CostCalculationMode::Display => {
+            // Always use existing costUSD, default to 0 if missing
+            entry.message.as_ref()
+                .and_then(|m| m.cost_usd)
+                .unwrap_or(0.0)
+        }
+        CostCalculationMode::Calculate => {
+            // Always recalculate from tokens
+            if let Some(message) = &entry.message {
+                if let (Some(model), Some(usage)) = (&message.model, &message.usage) {
+                    calculate_cost_from_tokens(usage, model)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        }
+        CostCalculationMode::Auto => {
+            // Use existing costUSD if available, otherwise calculate
+            if let Some(message) = &entry.message {
+                if let Some(existing_cost) = message.cost_usd {
+                    existing_cost
+                } else if let (Some(model), Some(usage)) = (&message.model, &message.usage) {
+                    calculate_cost_from_tokens(usage, model)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+/// Calculate cost from token usage and model name
+pub fn calculate_cost_from_tokens(usage: &Usage, model_name: &str) -> f64 {
+    if let Some(pricing) = get_model_pricing(model_name) {
+        let input_cost = (usage.input_tokens as f64) * pricing.input_cost_per_token;
+        let output_cost = (usage.output_tokens as f64) * pricing.output_cost_per_token;
+        let cache_write_cost = (usage.cache_creation_input_tokens as f64) * pricing.cache_creation_input_token_cost;
+        let cache_read_cost = (usage.cache_read_input_tokens as f64) * pricing.cache_read_input_token_cost;
+        
+        input_cost + output_cost + cache_write_cost + cache_read_cost
+    } else {
+        0.0
+    }
 }
 
 pub fn calculate_cost_per_hour(total_cost: f64, duration_minutes: f64) -> f64 {
