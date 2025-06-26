@@ -11,6 +11,13 @@ license = "MIT"
 keywords = ["claude", "monitoring", "token-usage", "cli", "cost-tracking"]
 categories = ["command-line-utilities", "development-tools"]
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ tag }/{ name }-{ tag }-{ target }.{ archive-format }"
+bin-dir = "{ name }-{ tag }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [[bin]]
 name = "ccusage-rs"
 path = "src/main.rs"
@@ -30,3 +37,9 @@ log = "0.4"
 env_logger = "0.11"
 regex = "1.0"
 rayon = "1.7"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+codegen-units = 1

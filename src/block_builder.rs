@@ -373,10 +373,19 @@ mod tests {
         ];
         let blocks = build_blocks_from_sessions(&sessions).unwrap();
 
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].total_tokens, 500);
-        assert_eq!(blocks[1].total_tokens, 750);
-        assert!(blocks[1].is_active); // Most recent block is active
+        // The sessions are 400-60 = 340 minutes apart (5.67 hours), which is > 5 hours
+        // So they should be in separate blocks with a gap block in between
+        assert_eq!(blocks.len(), 3); // 2 data blocks + 1 gap block
+        
+        // Filter out gap blocks to check data blocks
+        let data_blocks: Vec<_> = blocks.iter().filter(|b| !b.is_gap).collect();
+        assert_eq!(data_blocks.len(), 2);
+        assert_eq!(data_blocks[0].total_tokens, 500);
+        assert_eq!(data_blocks[1].total_tokens, 750);
+        assert!(data_blocks[1].is_active); // Most recent block is active
+        
+        // Check that middle block is a gap
+        assert!(blocks[1].is_gap);
     }
 
     #[test]
