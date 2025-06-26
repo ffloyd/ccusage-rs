@@ -36,7 +36,26 @@ A comprehensive token usage analyzer for Claude Code written in Rust. This tool 
 
 ## Installation
 
-### From crates.io (Recommended)
+### Pre-built binaries (Fastest ⚡)
+
+**Using cargo-binstall (recommended):**
+```bash
+# Install cargo-binstall if you don't have it
+cargo install cargo-binstall
+
+# Install ccusage-rs from pre-built binaries
+cargo binstall ccusage-rs
+```
+
+**Direct download:**
+Download the latest release for your platform from [GitHub Releases](https://github.com/snowmead/ccusage-rs/releases).
+
+Available platforms:
+- Linux (x86_64, ARM64, musl)
+- macOS (Intel, Apple Silicon)
+- Windows (x86_64)
+
+### From crates.io
 
 ```bash
 cargo install ccusage-rs

@@ -1,6 +1,6 @@
 [package]
 name = "ccusage-rs"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 authors = ["snowmead <snowmead@duck.com>"]
 description = "Real-time token usage monitor for Claude Code (cc) with cost tracking"

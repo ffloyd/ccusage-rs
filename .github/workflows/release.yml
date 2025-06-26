@@ -92,3 +92,75 @@ jobs:
           asset_name: ${{ env.ASSET }}
           tag: ${{ github.ref }}
           overwrite: true
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Generate release notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Get the previous release tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          # Get commits since last release
+          if [ -n "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --oneline --no-merges ${PREVIOUS_TAG}..HEAD)
+            COMMIT_RANGE="since ${PREVIOUS_TAG}"
+          else
+            COMMITS=$(git log --oneline --no-merges)
+            COMMIT_RANGE="for initial release"
+          fi
+          
+          # Get file changes
+          if [ -n "$PREVIOUS_TAG" ]; then
+            FILES_CHANGED=$(git diff --name-only ${PREVIOUS_TAG}..HEAD)
+          else
+            FILES_CHANGED=$(git ls-files)
+          fi
+
+          PROMPT_CONTENT="Create professional release notes for ccusage-rs version ${{ github.ref_name }}.
+
+          ## Commits ${COMMIT_RANGE}:
+          ${COMMITS}
+
+          ## Files changed:
+          ${FILES_CHANGED}
+
+          Please create release notes that:
+          - Summarize new features and improvements from the commits
+          - Highlight any bug fixes
+          - Note breaking changes (if any)
+          - Include installation instructions with cargo-binstall as the recommended method
+          - List supported platforms (Linux x86_64/ARM64/musl, macOS Intel/Apple Silicon, Windows x86_64)
+          - Keep it concise and professional
+          - Format as markdown suitable for GitHub releases
+
+          Focus on user-facing changes and benefits."
+
+          timeout 30m claude -p "${PROMPT_CONTENT}" > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
