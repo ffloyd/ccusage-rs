@@ -8,11 +8,8 @@
 //! - [`format_number_compact`] - Compact number formatting for table cells
 
 use anyhow::Result;
-use chrono::{DateTime, Utc, Datelike};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use crate::jsonl_parser::SessionData;
-use crate::pricing::calculate_session_cost;
+use chrono::Datelike;
+use serde::Serialize;
 
 /// JSON structures matching ccusage format exactly
 #[derive(Debug, Serialize)]
@@ -45,6 +42,17 @@ pub struct JsonOutput {
     pub daily: Vec<JsonDailyEntry>,
 }
 
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct ModelBreakdown {
+    pub model_name: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub total_tokens: u64,
+    pub cost_usd: f64,
+}
+
 #[derive(Debug, Default, Serialize)]
 pub struct DailyStats {
     pub date: String,
@@ -55,78 +63,12 @@ pub struct DailyStats {
     pub cache_read_tokens: u64,
     pub total_tokens: u64,
     pub cost_usd: f64,
+    pub model_breakdowns: Vec<ModelBreakdown>,
 }
 
-impl DailyStats {
-    fn new(date: String) -> Self {
-        Self {
-            date,
-            models: Vec::new(),
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-            total_tokens: 0,
-            cost_usd: 0.0,
-        }
-    }
 
-    fn add_session(&mut self, session: &SessionData) {
-        for (model_name, usage) in &session.model_usage {
-            // Add model to list if not already present
-            let simplified_model = simplify_model_name(model_name);
-            if !self.models.contains(&simplified_model) {
-                self.models.push(simplified_model);
-            }
 
-            // Track token aggregation for table display
-
-            // Add token counts
-            self.input_tokens += usage.total_input;
-            self.output_tokens += usage.total_output;
-            self.cache_creation_tokens += usage.total_cache_write;
-            self.cache_read_tokens += usage.total_cache_read;
-        }
-
-        // Update totals
-        self.total_tokens = self.input_tokens + self.output_tokens + self.cache_creation_tokens + self.cache_read_tokens;
-        let session_cost = calculate_session_cost(&session.model_usage);
-        self.cost_usd += session_cost;
-    }
-}
-
-pub fn aggregate_daily_stats(sessions: &[SessionData]) -> Result<Vec<DailyStats>> {
-    let mut daily_map: HashMap<String, DailyStats> = HashMap::new();
-
-    // Debug: Track what dates we're processing
-    if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
-        println!("DEBUG: Processing {} total sessions", sessions.len());
-    }
-
-    for session in sessions {
-        let date_key = session.start_time.format("%Y-%m-%d").to_string();
-        
-        // Debug: Show date processing
-        if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
-            if !daily_map.contains_key(&date_key) {
-                println!("DEBUG: First session for date {}: session {}", date_key, session.session_id);
-            }
-        }
-        
-        let daily_stat = daily_map.entry(date_key.clone())
-            .or_insert_with(|| DailyStats::new(date_key));
-        
-        daily_stat.add_session(session);
-    }
-
-    // Convert to sorted vector
-    let mut daily_stats: Vec<DailyStats> = daily_map.into_values().collect();
-    daily_stats.sort_by(|a, b| a.date.cmp(&b.date));
-
-    Ok(daily_stats)
-}
-
-fn simplify_model_name(model: &str) -> String {
+pub fn simplify_model_name(model: &str) -> String {
     if model.contains("opus") {
         "opus-4".to_string()
     } else if model.contains("sonnet") {
@@ -160,17 +102,116 @@ fn format_models_list(models: &[String]) -> String {
     result
 }
 
-pub fn format_table(daily_stats: &[DailyStats]) -> String {
+
+pub fn format_table_with_breakdown(daily_stats: &[DailyStats], breakdown: bool) -> String {
+    if breakdown {
+        format_breakdown_table(daily_stats)
+    } else {
+        format_standard_table(daily_stats)
+    }
+}
+
+fn format_breakdown_table(daily_stats: &[DailyStats]) -> String {
     let mut output = String::new();
     
     // Header
-    output.push_str("\n");
+    output.push('\n');
+    output.push_str(" ╭──────────────────────────────────────────────────╮\n");
+    output.push_str(" │                                                  │\n");
+    output.push_str(" │  Claude Code Token Usage - Daily Model Breakdown │\n");
+    output.push_str(" │                                                  │\n");
+    output.push_str(" ╰──────────────────────────────────────────────────╯\n");
+    output.push('\n');
+
+    let gray = "\x1b[90m";
+    let reset = "\x1b[39m";
+    let cyan = "\x1b[36m";
+    let green = "\x1b[32m";
+
+    // Calculate totals
+    let mut grand_total_tokens = 0u64;
+    let mut grand_total_cost = 0.0;
+
+    for stats in daily_stats {
+        output.push_str(&format!("\n{green}📅 {}{reset}\n", stats.date));
+        
+        if stats.model_breakdowns.is_empty() {
+            output.push_str("   No model usage data available\n");
+            continue;
+        }
+
+        // Table header for this date
+        output.push_str(&format!(
+            "{gray}┌─────────────{reset}{gray}┬──────────{reset}{gray}┬──────────{reset}{gray}┬──────────{reset}{gray}┬──────────{reset}{gray}┬──────────{reset}{gray}┬──────────┐{reset}\n"
+        ));
+        
+        output.push_str(&format!(
+            "{gray}│{reset}{cyan} Model       {reset}{gray}│{reset}{cyan}    Input {reset}{gray}│{reset}{cyan}   Output {reset}{gray}│{reset}{cyan}    Cache {reset}{gray}│{reset}{cyan}     Read {reset}{gray}│{reset}{cyan}    Total {reset}{gray}│{reset}{cyan}     Cost {reset}{gray}│{reset}\n"
+        ));
+        
+        output.push_str(&format!(
+            "{gray}│{reset}{cyan}             {reset}{gray}│{reset}{cyan}          {reset}{gray}│{reset}{cyan}          {reset}{gray}│{reset}{cyan}   Create {reset}{gray}│{reset}{cyan}          {reset}{gray}│{reset}{cyan}   Tokens {reset}{gray}│{reset}{cyan}    (USD) {reset}{gray}│{reset}\n"
+        ));
+
+        // Data rows for each model
+        for breakdown in &stats.model_breakdowns {
+            output.push_str(&format!(
+                "{gray}├─────────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────┤{reset}\n"
+            ));
+
+            output.push_str(&format!(
+                "{gray}│{reset} {:<11} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset}\n",
+                breakdown.model_name,
+                format_number_compact(breakdown.input_tokens),
+                format_number_compact(breakdown.output_tokens),
+                format_number_compact(breakdown.cache_creation_tokens),
+                format_number_compact(breakdown.cache_read_tokens),
+                format_number_compact(breakdown.total_tokens),
+                format!("${:.2}", breakdown.cost_usd)
+            ));
+        }
+
+        // Totals row for this date
+        output.push_str(&format!(
+            "{gray}├─────────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────┤{reset}\n"
+        ));
+
+        output.push_str(&format!(
+            "{gray}│{reset} {green}Total{reset}       {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset} {:>8} {gray}│{reset}\n",
+            format_number_compact(stats.input_tokens),
+            format_number_compact(stats.output_tokens),
+            format_number_compact(stats.cache_creation_tokens),
+            format_number_compact(stats.cache_read_tokens),
+            format_number_compact(stats.total_tokens),
+            format!("${:.2}", stats.cost_usd)
+        ));
+
+        output.push_str(&format!(
+            "{gray}└─────────────{reset}{gray}┴──────────{reset}{gray}┴──────────{reset}{gray}┴──────────{reset}{gray}┴──────────{reset}{gray}┴──────────{reset}{gray}┴──────────┘{reset}\n"
+        ));
+
+        grand_total_tokens += stats.total_tokens;
+        grand_total_cost += stats.cost_usd;
+    }
+
+    // Grand totals
+    output.push_str(&format!("\n{green}📊 Grand Total: {} tokens | ${:.2}{reset}\n", 
+        format_number_compact(grand_total_tokens), grand_total_cost));
+
+    output
+}
+
+fn format_standard_table(daily_stats: &[DailyStats]) -> String {
+    let mut output = String::new();
+    
+    // Header
+    output.push('\n');
     output.push_str(" ╭──────────────────────────────────────────╮\n");
     output.push_str(" │                                          │\n");
     output.push_str(" │  Claude Code Token Usage Report - Daily  │\n");
     output.push_str(" │                                          │\n");
     output.push_str(" ╰──────────────────────────────────────────╯\n");
-    output.push_str("\n");
+    output.push('\n');
 
     // Table header
     output.push_str(&format!(
@@ -197,7 +238,7 @@ pub fn format_table(daily_stats: &[DailyStats]) -> String {
     let mut total_cost = 0.0;
 
     // Data rows
-    for (i, stats) in daily_stats.iter().enumerate() {
+    for stats in daily_stats.iter() {
         // Add separator
         output.push_str(&format!(
             "{gray}├──────────{reset}{gray}┼───────────────────────────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────{reset}{gray}┼──────────┤{reset}\n",
@@ -322,56 +363,6 @@ pub fn generate_json_output(daily_stats: &[DailyStats]) -> Result<JsonOutput> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-    use crate::jsonl_parser::ModelUsage;
-
-    fn create_test_session(date: &str, model: &str, input: u64, output: u64) -> SessionData {
-        let start_time = DateTime::parse_from_rfc3339(&format!("{}T12:00:00Z", date))
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let mut model_usage = HashMap::new();
-        model_usage.insert(model.to_string(), ModelUsage {
-            model_name: model.to_string(),
-            total_input: input,
-            total_output: output,
-            total_cache_write: 0,
-            total_cache_read: 0,
-            message_count: 1,
-            weighted_tokens: input + output,
-        });
-
-        SessionData {
-            session_id: "test".to_string(),
-            start_time,
-            end_time: Some(start_time),
-            model_usage,
-            total_weighted_tokens: input + output,
-            has_limit_error: false,
-            limit_type: None,
-        }
-    }
-
-    #[test]
-    fn test_daily_aggregation() {
-        let sessions = vec![
-            create_test_session("2025-06-24", "claude-opus-4-20250514", 100, 200),
-            create_test_session("2025-06-24", "claude-sonnet-4-20250325", 150, 250),
-            create_test_session("2025-06-25", "claude-opus-4-20250514", 300, 400),
-        ];
-
-        let daily_stats = aggregate_daily_stats(&sessions).unwrap();
-        
-        assert_eq!(daily_stats.len(), 2);
-        assert_eq!(daily_stats[0].date, "2025-06-24");
-        assert_eq!(daily_stats[0].input_tokens, 250); // 100 + 150
-        assert_eq!(daily_stats[0].output_tokens, 450); // 200 + 250
-        assert_eq!(daily_stats[0].models.len(), 2);
-        
-        assert_eq!(daily_stats[1].date, "2025-06-25");
-        assert_eq!(daily_stats[1].input_tokens, 300);
-        assert_eq!(daily_stats[1].output_tokens, 400);
-    }
 
     #[test]
     fn test_model_name_simplification() {

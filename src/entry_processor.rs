@@ -7,16 +7,15 @@
 //! - [`aggregate_entries_by_date`] - Group and aggregate entries by date
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Local};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::jsonl_parser::{SessionEntry, Usage, ModelUsage};
+use crate::jsonl_parser::{SessionEntry, Usage};
 use crate::pricing::calculate_cost_from_tokens;
-use crate::table_display::DailyStats;
+use crate::table_display::{DailyStats, ModelBreakdown};
 
 #[derive(Debug)]
 pub struct ProcessedEntry {
@@ -87,7 +86,7 @@ fn process_file_entries(
                         
                         let timestamp = DateTime::parse_from_rfc3339(&entry.timestamp)
                             .context("Failed to parse timestamp")?
-                            .with_timezone(&Utc);
+                            .with_timezone(&Local);
                         
                         let date = timestamp.format("%Y-%m-%d").to_string();
                         
@@ -133,15 +132,42 @@ fn aggregate_entries_by_date(entries: Vec<ProcessedEntry>) -> Result<Vec<DailySt
                 cache_read_tokens: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,
+                model_breakdowns: Vec::new(),
             });
         
         // Add model to list if not already present
         let simplified_model = simplify_model_name(&entry.model);
         if !daily_stat.models.contains(&simplified_model) {
-            daily_stat.models.push(simplified_model);
+            daily_stat.models.push(simplified_model.clone());
         }
         
-        // Add token counts
+        // Update per-model breakdown
+        if let Some(breakdown) = daily_stat.model_breakdowns.iter_mut().find(|b| b.model_name == simplified_model) {
+            breakdown.input_tokens += entry.usage.input_tokens;
+            breakdown.output_tokens += entry.usage.output_tokens;
+            breakdown.cache_creation_tokens += entry.usage.cache_creation_input_tokens;
+            breakdown.cache_read_tokens += entry.usage.cache_read_input_tokens;
+            breakdown.total_tokens += entry.usage.input_tokens 
+                + entry.usage.output_tokens 
+                + entry.usage.cache_creation_input_tokens 
+                + entry.usage.cache_read_input_tokens;
+            breakdown.cost_usd += entry.cost;
+        } else {
+            daily_stat.model_breakdowns.push(ModelBreakdown {
+                model_name: simplified_model,
+                input_tokens: entry.usage.input_tokens,
+                output_tokens: entry.usage.output_tokens,
+                cache_creation_tokens: entry.usage.cache_creation_input_tokens,
+                cache_read_tokens: entry.usage.cache_read_input_tokens,
+                total_tokens: entry.usage.input_tokens 
+                    + entry.usage.output_tokens 
+                    + entry.usage.cache_creation_input_tokens 
+                    + entry.usage.cache_read_input_tokens,
+                cost_usd: entry.cost,
+            });
+        }
+        
+        // Add token counts to totals
         daily_stat.input_tokens += entry.usage.input_tokens;
         daily_stat.output_tokens += entry.usage.output_tokens;
         daily_stat.cache_creation_tokens += entry.usage.cache_creation_input_tokens;

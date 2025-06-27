@@ -6,17 +6,10 @@
 //! - [`ModelPricing`] - Pricing structure for different token types
 //! - [`calculate_session_cost`] - Calculate total cost for a session
 //! - [`get_model_pricing`] - Get pricing configuration for a specific model
-//! - [`CostCalculationMode`] - Cost calculation modes matching ccusage
 
 use std::collections::HashMap;
-use crate::jsonl_parser::{ModelUsage, Usage, SessionEntry};
+use crate::jsonl_parser::{ModelUsage, Usage};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CostCalculationMode {
-    Auto,       // Use existing costUSD or calculate if missing
-    Display,    // Always use existing costUSD 
-    Calculate,  // Always recalculate from tokens
-}
 
 #[derive(Debug, Clone)]
 pub struct ModelPricing {
@@ -122,47 +115,6 @@ pub fn calculate_session_cost(model_usage: &HashMap<String, ModelUsage>) -> f64 
             get_model_pricing(model_name).map(|pricing| pricing.calculate_cost(usage))
         })
         .sum()
-}
-
-/// Calculate cost for a single entry matching ccusage's calculateCostForEntry logic
-pub fn calculate_cost_for_entry(
-    entry: &SessionEntry,
-    mode: CostCalculationMode,
-) -> f64 {
-    match mode {
-        CostCalculationMode::Display => {
-            // Always use existing costUSD, default to 0 if missing
-            entry.message.as_ref()
-                .and_then(|m| m.cost_usd)
-                .unwrap_or(0.0)
-        }
-        CostCalculationMode::Calculate => {
-            // Always recalculate from tokens
-            if let Some(message) = &entry.message {
-                if let (Some(model), Some(usage)) = (&message.model, &message.usage) {
-                    calculate_cost_from_tokens(usage, model)
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            }
-        }
-        CostCalculationMode::Auto => {
-            // Use existing costUSD if available, otherwise calculate
-            if let Some(message) = &entry.message {
-                if let Some(existing_cost) = message.cost_usd {
-                    existing_cost
-                } else if let (Some(model), Some(usage)) = (&message.model, &message.usage) {
-                    calculate_cost_from_tokens(usage, model)
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            }
-        }
-    }
 }
 
 /// Calculate cost from token usage and model name

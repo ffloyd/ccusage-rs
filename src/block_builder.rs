@@ -335,7 +335,7 @@ mod tests {
             model_usage,
             total_weighted_tokens: tokens,
             has_limit_error: false,
-            limit_type: None,
+            _limit_type: None,
         }
     }
 

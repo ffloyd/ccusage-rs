@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -80,7 +80,7 @@ pub struct Usage {
     pub service_tier: Option<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct ModelUsage {
     pub model_name: String,
     pub total_input: u64,
@@ -104,9 +104,6 @@ impl ModelUsage {
         self.weighted_tokens += weighted;
     }
 
-    pub fn total_raw_tokens(&self) -> u64 {
-        self.total_input + self.total_output
-    }
 }
 
 #[derive(Debug)]
@@ -117,7 +114,7 @@ pub struct SessionData {
     pub model_usage: HashMap<String, ModelUsage>,
     pub total_weighted_tokens: u64,
     pub has_limit_error: bool,
-    pub limit_type: Option<String>, // "opus" or "general"
+    pub _limit_type: Option<String>, // "opus" or "general"
 }
 
 impl SessionData {
@@ -129,7 +126,7 @@ impl SessionData {
             model_usage: HashMap::new(),
             total_weighted_tokens: 0,
             has_limit_error: false,
-            limit_type: None,
+            _limit_type: None,
         }
     }
 
@@ -189,154 +186,9 @@ impl SessionData {
     }
 }
 
-/// Validate entry schema exactly like ccusage does (minimal validation)
-fn validate_usage_schema(json: &serde_json::Value) -> bool {
-    // Only check absolute minimum required fields that ccusage requires
-    
-    // 1. Timestamp must be present (ccusage checks this)
-    if !json.get("timestamp").and_then(|v| v.as_str()).is_some() {
-        return false;
-    }
 
-    // 2. Message object must be present
-    let message = match json.get("message") {
-        Some(m) if m.is_object() => m,
-        _ => return false,
-    };
 
-    // 3. Usage object must be present within message
-    let usage = match message.get("usage") {
-        Some(u) if u.is_object() => u,
-        _ => return false,
-    };
 
-    // 4. ONLY input_tokens and output_tokens are required (ccusage requires these as numbers)
-    if !usage.get("input_tokens").and_then(|v| v.as_f64()).is_some() {
-        return false;
-    }
-    if !usage.get("output_tokens").and_then(|v| v.as_f64()).is_some() {
-        return false;
-    }
-
-    // All other fields are optional and ccusage is very lenient
-    // Don't validate optional fields to match ccusage's behavior
-    
-    true
-}
-
-/// Validate ISO timestamp format matching ccusage regex: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/
-fn is_valid_iso_timestamp(timestamp: &str) -> bool {
-    use regex::Regex;
-    
-    // Create regex exactly matching ccusage validation
-    let iso_regex = Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$").unwrap();
-    iso_regex.is_match(timestamp)
-}
-
-/// Validate version format matching ccusage regex: /^\d+\.\d+\.\d+/ (lenient - starts with pattern)
-fn is_valid_version_lenient(version: &str) -> bool {
-    use regex::Regex;
-    
-    // ccusage regex only requires string to START with semantic version pattern
-    let version_regex = Regex::new(r"^\d+\.\d+\.\d+").unwrap();
-    version_regex.is_match(version)
-}
-
-/// Create unique hash for entry deduplication (matching ccusage logic)
-fn create_unique_hash(entry: &SessionEntry) -> Option<String> {
-    if let Some(message) = &entry.message {
-        if let (Some(message_id), Some(request_id)) = (&message.id, &entry.request_id) {
-            return Some(format!("{}:{}", message_id, request_id));
-        }
-    }
-    None
-}
-
-pub fn parse_session_file_with_deduplication(
-    path: &Path,
-    processed_hashes: &mut HashSet<String>,
-) -> Result<SessionData> {
-    let file = File::open(path).context("Failed to open JSONL file")?;
-    let reader = BufReader::new(file);
-
-    let mut session_data: Option<SessionData> = None;
-    let mut skipped_duplicates = 0;
-    let mut skipped_invalid = 0;
-
-    for line in reader.lines() {
-        let line = line.context("Failed to read line")?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Parse as raw JSON first to check for missing fields (matching ccusage validation)
-        let parsed_json: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(json) => json,
-            Err(_) => {
-                skipped_invalid += 1;
-                continue;
-            }
-        };
-
-        // Validate schema like ccusage does
-        if !validate_usage_schema(&parsed_json) {
-            skipped_invalid += 1;
-            continue;
-        }
-
-        // Try to parse as SessionEntry
-        match serde_json::from_str::<SessionEntry>(&line) {
-            Ok(entry) => {
-                
-                // Create unique hash for deduplication (matching ccusage logic)
-                if let Some(unique_hash) = create_unique_hash(&entry) {
-                    if processed_hashes.contains(&unique_hash) {
-                        skipped_duplicates += 1;
-                        continue;
-                    }
-                    processed_hashes.insert(unique_hash);
-                }
-
-                // Initialize session data on first valid entry
-                if session_data.is_none() {
-                    if let Ok(timestamp) = DateTime::parse_from_rfc3339(&entry.timestamp) {
-                        let new_session = SessionData::new(
-                            entry.session_id.clone(),
-                            timestamp.with_timezone(&Utc),
-                        );
-                        session_data = Some(new_session);
-                    }
-                }
-
-                if let Some(ref mut data) = session_data {
-                    let _ = data.add_entry(&entry); // Ignore individual entry errors
-                }
-            }
-            Err(_) => {
-                skipped_invalid += 1;
-                continue;
-            }
-        }
-    }
-
-    // Only print debug info if explicitly requested via environment variable
-    if std::env::var("CC_USAGE_DETAILED_DEBUG").is_ok() {
-        println!(
-            "DEBUG: File {} - {} valid entries, {} skipped duplicates, {} invalid entries",
-            path.file_name().unwrap_or_default().to_string_lossy(),
-            if session_data.is_some() { "processed" } else { "0" },
-            skipped_duplicates,
-            skipped_invalid
-        );
-    }
-
-    if let Some(mut data) = session_data {
-        data.calculate_totals();
-        Ok(data)
-    } else {
-        anyhow::bail!("No valid session entries found in JSONL file")
-    }
-}
 
 pub fn parse_session_file(path: &Path) -> Result<SessionData> {
     let file = File::open(path).context("Failed to open JSONL file")?;
@@ -421,34 +273,6 @@ pub fn find_session_files(
     Ok(files)
 }
 
-pub fn get_project_dir(cwd: &Path) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let claude_dir = home.join(".claude");
-
-    // Try multiple strategies for project directory discovery
-    let strategies = [
-        // Strategy 1: Replace path separators with dashes
-        cwd.to_string_lossy().replace('/', "-"),
-        // Strategy 2: Use just the project name (last path component)
-        cwd.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string(),
-        // Strategy 3: Use full path with system-specific separators
-        cwd.to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "-"),
-    ];
-
-    for strategy in &strategies {
-        let candidate = claude_dir.join("projects").join(strategy);
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-
-    // Fallback to first strategy (original behavior)
-    claude_dir.join("projects").join(&strategies[0])
-}
 
 pub fn get_all_project_dirs(_cwd: &Path) -> Vec<PathBuf> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -494,7 +318,7 @@ mod tests {
             service_tier: None,
         });
 
-        assert_eq!(usage.total_raw_tokens(), 300);
+        assert_eq!(usage.total_input + usage.total_output, 300);
         assert_eq!(usage.weighted_tokens, 1500); // 300 * 5.0 multiplier
     }
 }
