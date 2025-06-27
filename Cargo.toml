@@ -12,8 +12,8 @@ keywords = ["claude", "monitoring", "token-usage", "cli", "cost-tracking"]
 categories = ["command-line-utilities", "development-tools"]
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/{ tag }/{ name }-{ tag }-{ target }.{ archive-format }"
-bin-dir = "{ name }-{ tag }-{ target }/{ bin }{ binary-ext }"
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.{ archive-format }"
+bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"
