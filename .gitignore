@@ -1,1 +1,6 @@
 /target
+
+# Ignore direnv files
+# (direnv setup is usually personal and should not be committed)
+/.direnv
+/.envrc
