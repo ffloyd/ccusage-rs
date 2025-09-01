@@ -86,6 +86,29 @@ cargo build --release
 # Binary will be at ./target/release/ccusage-rs
 ```
 
+### Using Nix Flake
+
+Run directly from GitHub:
+
+```bash
+nix run github:snowmead/ccusage-rs
+```
+
+Or use inside inside other flake-driven setups:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    ccusage-rs.url = "github:snowmead/ccusage-rs";
+  };
+
+  outputs = { nixpkgs, ccusage-rs, ... }: {
+    # Access the package via ccusage-rs.packages.${pkgs.system}.default
+  };
+}
+```
+
 ## Usage
 
 After installation, the `ccusage-rs` command will be available in your PATH:
